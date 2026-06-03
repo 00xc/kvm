@@ -2,6 +2,10 @@
 
 ## Upcoming Release
 
+### Added
+
+- [[#375]](https://github.com/rust-vmm/kvm/pull/375) Add TDX support.
+
 ### Changed
 
 - [[#382]](https://github.com/rust-vmm/kvm/pull/382) `VmFd::enable_cap` and the
