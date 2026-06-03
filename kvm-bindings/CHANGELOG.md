@@ -7,6 +7,8 @@
 - [[381]](https://github.com/rust-vmm/kvm/pull/381)
   Raised kvm_irq_routing cap to KVM_MAX_IRQ_ROUTES (4096) matching the
   kernel
+- [[#375]](https://github.com/rust-vmm/kvm/pull/375) Updated bindings to
+  Linux v7.1-rc6.
 
 ## v0.14.1
 
