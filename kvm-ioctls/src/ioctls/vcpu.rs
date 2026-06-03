@@ -94,6 +94,52 @@ bitflags::bitflags! {
     }
 }
 
+// These are not exported as part of the KVM API.
+const TDVMCALL_GET_TD_VM_CALL_INFO: u64 = 0x10000;
+const TDVMCALL_GET_QUOTE: u64 = 0x10002;
+const TDVMCALL_SETUP_EVENT_NOTIFY_INTERRUPT: u64 = 0x10004;
+
+/// Information about a [`VcpuExit`] triggered by a guest TDVMCALL (`KVM_EXIT_TDX`).
+#[derive(Debug)]
+pub enum TdxExit<'a> {
+    /// The guest has requested to generate a TD-Quote. See documentation for
+    /// `TDVMCALL_GET_QUOTE`.
+    GetQuote {
+        /// Return value of the `GetQuote` request.
+        ret: &'a mut u64,
+        /// Guest physical address of the TD report buffer.
+        gpa: u64,
+        /// Size of the TD report buffer.
+        size: u64,
+    },
+    /// The guest has requested the support status of TDVMCALLs. See documentation
+    /// for `TDVMCALL_GET_TD_VM_CALL_INFO`.
+    GetTdVmcallInfo {
+        /// Return value for the request
+        ret: &'a mut u64,
+        /// Requested leaf
+        leaf: u64,
+        /// Output R11 value
+        r11: &'a mut u64,
+        /// Output R12 value
+        r12: &'a mut u64,
+        /// Output R13 value
+        r13: &'a mut u64,
+        /// Output R14 value
+        r14: &'a mut u64,
+    },
+    /// The guest has requested to set up a notification interrupt for the given
+    /// vector. See documentation for `TDVMCALL_SETUP_EVENT_NOTIFY_INTERRUPT`.
+    SetupEventNotify {
+        /// Return value for the request
+        ret: &'a mut u64,
+        /// Vector for which the notification should be set up
+        vector: u64,
+    },
+    /// Unknown TDVMCALL.
+    Unknown,
+}
+
 /// Reasons for vCPU exits.
 ///
 /// The exit reasons are mapped to the `KVM_EXIT_*` defines in the
@@ -183,6 +229,13 @@ pub enum VcpuExit<'a> {
         gpa: u64,
         /// size
         size: u64,
+    },
+    /// Corresponds to KVM_EXIT_TDX
+    Tdx {
+        /// Exit flags
+        flags: u64,
+        /// Enum describing the exit and its parameters
+        exit: TdxExit<'a>,
     },
     /// Corresponds to an exit reason that is unknown from the current version
     /// of the kvm-ioctls crate. Let the consumer decide about what to do with
@@ -1655,6 +1708,47 @@ impl VcpuFd {
                     Ok(VcpuExit::IoapicEoi(eoi.vector))
                 }
                 KVM_EXIT_HYPERV => Ok(VcpuExit::Hyperv),
+                KVM_EXIT_TDX => {
+                    // SAFETY: exit reason (from the kernel) tells us this is a TDX exit
+                    let tdx = unsafe { &mut run.__bindgen_anon_1.tdx };
+                    let exit = match tdx.nr {
+                        TDVMCALL_GET_QUOTE => {
+                            // SAFETY: `nr` tells us this is a get_quote request
+                            let getquote = unsafe { &mut tdx.__bindgen_anon_1.get_quote };
+                            TdxExit::GetQuote {
+                                ret: &mut getquote.ret,
+                                gpa: getquote.gpa,
+                                size: getquote.size,
+                            }
+                        }
+                        TDVMCALL_GET_TD_VM_CALL_INFO => {
+                            // SAFETY: `nr` tells us this is a get_tdvmcall_info request
+                            let get_info = unsafe { &mut tdx.__bindgen_anon_1.get_tdvmcall_info };
+                            TdxExit::GetTdVmcallInfo {
+                                ret: &mut get_info.ret,
+                                leaf: get_info.leaf,
+                                r11: &mut get_info.r11,
+                                r12: &mut get_info.r12,
+                                r13: &mut get_info.r13,
+                                r14: &mut get_info.r14,
+                            }
+                        }
+                        TDVMCALL_SETUP_EVENT_NOTIFY_INTERRUPT => {
+                            // SAFETY: `nr` tells us this is a setup_event_notify request
+                            let setup_event =
+                                unsafe { &mut tdx.__bindgen_anon_1.setup_event_notify };
+                            TdxExit::SetupEventNotify {
+                                ret: &mut setup_event.ret,
+                                vector: setup_event.vector,
+                            }
+                        }
+                        _ => TdxExit::Unknown,
+                    };
+                    Ok(VcpuExit::Tdx {
+                        flags: tdx.flags,
+                        exit,
+                    })
+                }
                 r => Ok(VcpuExit::Unsupported(r)),
             }
         } else {
